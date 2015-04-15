@@ -3063,7 +3063,7 @@ class OffScreenFloatCanvas(object):
                     Blit(0, 0, PanelSize0, PanelSize1, dc, 0, 0)
         dc.EndDrawing()
 
-    def SaveAsImage(self, filename, ImageType=wx.BITMAP_TYPE_PNG):
+    def SaveAsImage(self, filename, ImageType=wx.BITMAP_TYPE_PNG, transparent_color=None):
         """
 
         Saves the current image as an image file. The default is in the
@@ -3077,7 +3077,47 @@ class OffScreenFloatCanvas(object):
         etc. (see the wx docs for the complete list)
 
         """
-        self._Buffer.SaveFile(filename, ImageType)
+        if transparent_color is None:
+            self._Buffer.SaveFile(filename, ImageType)
+        else:
+            image = wx.EmptyBitmap(self.PanelSize[0],
+                                   self.PanelSize[1])
+
+            dc = wx.MemoryDC()
+            dc.SelectObject(image)
+            dc.DrawBitmap(self._Buffer,0,0)
+            mask = wx.Mask(image, transparent_color)
+            image.SetMask(mask)
+            image.SaveFile(filename, ImageType)
+    
+    def GetNumpyArray(self, transparent_color=None):
+        """
+        Gets image as numpy array, with optional transparency of a specified
+        color.
+        
+        There's a bug in GTK at least where drawing on a transparent background
+        in an doesn't seem to work, so here trasparency is supported by
+        masking out a specific color.
+        
+        """
+        a = N.zeros((self.PanelSize[1], self.PanelSize[0], 4), N.uint8)
+        self._Buffer.CopyToBuffer(a, format=wx.BitmapBufferFormat_RGBA)
+        # CopyToBuffer raises RuntimeError when transparency masks are used, so
+        # have to brute-force the transparency.
+        if transparent_color is not None:
+            r = transparent_color.Red()
+            g = transparent_color.Green()
+            b = transparent_color.Blue()
+            # FIXME: SLOW!!!!!
+#            indexes = N.intersect1d(N.intersect1d(N.where(a[:,:,0].flat == r), N.where(a[:,:,1].flat == g)), N.where(a[:,:,2].flat == b))
+            indexes = []
+            val = (r*256*256 + g*256 + b)*256 + 255
+            t = a.view(dtype=N.uint32)
+            indexes = N.where(t.flat == val)
+#            print "val", val, "Transparent!", indexes
+#            print r, g, b
+            a[:,:,3].flat[indexes] = 0 
+        return a
     
     def Draw(self, Force=False):
         """
