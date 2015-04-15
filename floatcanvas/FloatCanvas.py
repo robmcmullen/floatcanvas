@@ -2371,134 +2371,23 @@ class Arc(XYObjectMixin, LineAndFillMixin, DrawObject):
 
 
 #---------------------------------------------------------------------------
-class FloatCanvas(wx.Panel):
-    """
-    FloatCanvas.py
-
-    This is a high level window for drawing maps and anything else in an
-    arbitrary coordinate system.
-
-    The goal is to provide a convenient way to draw stuff on the screen
-    without having to deal with handling OnPaint events, converting to pixel
-    coordinates, knowing about wxWindows brushes, pens, and colors, etc. It
-    also provides virtually unlimited zooming and scrolling
-
-    I am using it for two things:
-    1) general purpose drawing in floating point coordinates
-    2) displaying map data in Lat-long coordinates
-
-    If the projection is set to None, it will draw in general purpose
-    floating point coordinates. If the projection is set to 'FlatEarth', it
-    will draw a FlatEarth projection, centered on the part of the map that
-    you are viewing. You can also pass in your own projection function.
-
-    It is double buffered, so re-draws after the window is uncovered by something
-    else are very quick.
-
-    It relies on NumPy, which is needed for speed (maybe, I havn't profiled it)
-
-    Bugs and Limitations:
-        Lots: patches, fixes welcome
-
-    For Map drawing: It ignores the fact that the world is, in fact, a
-    sphere, so it will do strange things if you are looking at stuff near
-    the poles or the date line. so far I don't have a need to do that, so I
-    havn't bothered to add any checks for that yet.
-
-    Zooming:
-    I have set no zoom limits. What this means is that if you zoom in really
-    far, you can get integer overflows, and get wierd results. It
-    doesn't seem to actually cause any problems other than wierd output, at
-    least when I have run it.
-
-    Speed:
-    I have done a couple of things to improve speed in this app. The one
-    thing I have done is used NumPy Arrays to store the coordinates of the
-    points of the objects. This allowed me to use array oriented functions
-    when doing transformations, and should provide some speed improvement
-    for objects with a lot of points (big polygons, polylines, pointsets).
-
-    The real slowdown comes when you have to draw a lot of objects, because
-    you have to call the wx.DC.DrawSomething call each time. This is plenty
-    fast for tens of objects, OK for hundreds of objects, but pretty darn
-    slow for thousands of objects.
-
-    The solution is to be able to pass some sort of object set to the DC
-    directly. I've used DC.DrawPointList(Points), and it helped a lot with
-    drawing lots of points. I havn't got a LineSet type object, so I havn't
-    used DC.DrawLineList yet. I'd like to get a full set of DrawStuffList()
-    methods implimented, and then I'd also have a full set of Object sets
-    that could take advantage of them. I hope to get to it some day.
-
-    Mouse Events:
-
-    At this point, there are a full set of custom mouse events. They are
-    just like the regular mouse events, but include an extra attribute:
-    Event.GetCoords(), that returns the (x,y) position in world
-    coordinates, as a length-2 NumPy vector of Floats.
-
-    Copyright: Christopher Barker
-
-    License: Same as the version of wxPython you are using it with
-
-    Please let me know if you're using this!!!
-
-    Contact me at:
-
-    Chris.Barker@noaa.gov
-
-    """
-
-    def __init__(self, parent, id = -1,
-                 size = wx.DefaultSize,
-                 ProjectionFun = None,
+class OffScreenFloatCanvas(object):
+    def __init__(self, size, ProjectionFun = None,
                  BackgroundColor = "WHITE",
                  Debug = False,
                  **kwargs):
-
-        wx.Panel.__init__( self, parent, id, wx.DefaultPosition, size, **kwargs)
-
         self.ComputeFontScale()
+        self.InitializePanelSize(size)
         self.InitAll()
 
         self.BackgroundBrush = wx.Brush(BackgroundColor,wx.SOLID)
 
         self.Debug = Debug
 
-        wx.EVT_PAINT(self, self.OnPaint)
-        wx.EVT_SIZE(self, self.OnSize)
-
-        wx.EVT_LEFT_DOWN(self, self.LeftDownEvent)
-        wx.EVT_LEFT_UP(self, self.LeftUpEvent)
-        wx.EVT_LEFT_DCLICK(self, self.LeftDoubleClickEvent)
-        wx.EVT_MIDDLE_DOWN(self, self.MiddleDownEvent)
-        wx.EVT_MIDDLE_UP(self, self.MiddleUpEvent)
-        wx.EVT_MIDDLE_DCLICK(self, self.MiddleDoubleClickEvent)
-        wx.EVT_RIGHT_DOWN(self, self.RightDownEvent)
-        wx.EVT_RIGHT_UP(self, self.RightUpEvent)
-        wx.EVT_RIGHT_DCLICK(self, self.RightDoubleCLickEvent)
-        wx.EVT_MOTION(self, self.MotionEvent)
-        wx.EVT_MOUSEWHEEL(self, self.WheelEvent)
-        wx.EVT_KEY_DOWN(self, self.KeyDownEvent)
-        wx.EVT_KEY_UP(self, self.KeyUpEvent)
-
-
-        ## CHB: I'm leaving these out for now.
-        #wx.EVT_ENTER_WINDOW(self, self. )
-        #wx.EVT_LEAVE_WINDOW(self, self. )
-
         self.SetProjectionFun(ProjectionFun)
         
         self.GUIMode = None # making sure the arrribute exists
         self.SetMode(GUIMode.GUIMouse()) # make the default Mouse Mode.
-
-        # timer to give a delay when re-sizing so that buffers aren't re-built too many times.
-        self.SizeTimer = wx.PyTimer(self.OnSizeTimer)
-
-#        self.InitializePanel()
-#        self.MakeNewBuffers()
-
-#        self.CreateCursors()
 
     def ComputeFontScale(self):
         ## A global variable to hold the scaling from pixel size to point size.
@@ -2528,7 +2417,6 @@ class FloatCanvas(wx.Panel):
 
         self._DrawList = []
         self._ForeDrawList = []
-        self.InitializePanel()
         self.MakeNewBuffers()
         self.BoundingBox = BBox.NullBBox()
         self.BoundingBoxDirty = False
@@ -2579,6 +2467,11 @@ class FloatCanvas(wx.Panel):
             Mode.Canvas = self # make sure the mode is linked to this canvas
             self.GUIMode = Mode
             self.SetCursor(self.GUIMode.Cursor)
+    
+    def SetCursor(self, cursor):
+        # Placeholder method that must be overridden in subclass to change
+        # cursor
+        pass
 
     def MakeHitDict(self):
         ##fixme: Should this just be None if nothing has been bound?
@@ -2601,9 +2494,12 @@ class FloatCanvas(wx.Panel):
         This is called in various other places to raise a Mouse Event
         """
         pt = self.PixelToWorld( Event.GetPosition() )
-        evt = _MouseEvent(EventType, Event, self.GetId(), pt)
+        evt = _MouseEvent(EventType, Event, self.mouse_handler_window.GetId(), pt)
         # called the Windows usual event handler
-        self.GetEventHandler().ProcessEvent(evt)
+        self.mouse_handler_window.GetEventHandler().ProcessEvent(evt)
+
+    def SetMouseHandlerWindow(self, win):
+        self.mouse_handler_window = win
 
     if wx.__version__ >= "2.8":
         HitTestBitmapDepth = 32
@@ -2653,11 +2549,24 @@ class FloatCanvas(wx.Panel):
 
         If the event is outside the Window, no object will be considered hit
         """
+        xy = event.GetPosition()
+        return self.HitTestAtPos(xy, HitEvent)
+
+    def HitTestAtPos(self, xy, HitEvent):
+        """
+        Does a hit test on objects that are "hit-able"
+
+        If an object is hit, its event handler is called,
+        and this method returns True
+
+        If no object is hit, this method returns False.
+
+        If the event is outside the Window, no object will be considered hit
+        """
         if self.HitDict:
             # check if there are any objects in the dict for this event
             if self.HitDict[ HitEvent ]:
-                xy = event.GetPosition()
-                winsize = self.Size
+                winsize = self.PanelSize
                 if not (xy[0] < 0 or xy[1] < 0 or xy[0] > winsize[0] or xy[1] > winsize[1]):
                     # The mouse event is in the Window
                     color = self.GetHitTestColor( xy )
@@ -2667,14 +2576,16 @@ class FloatCanvas(wx.Panel):
                         return True
             return False
 
-
     def MouseOverTest(self, event):
+        xy = event.GetPosition()
+        return self.MouseOverTestAtPos(xy)
+
+    def MouseOverTestAtPos(self, xy):
         ##fixme: Can this be cleaned up?
         if (self.HitDict and
             (self.HitDict[EVT_FC_ENTER_OBJECT ] or
              self.HitDict[EVT_FC_LEAVE_OBJECT ]    )
             ):
-            xy = event.GetPosition()
             color = self.GetHitTestColor( xy )
             OldObject = self.ObjectUnderMouse
             ObjectCallbackCalled = False
@@ -2719,77 +2630,6 @@ class FloatCanvas(wx.Panel):
             return ObjectCallbackCalled
         return False
 
-    ## fixme: There is a lot of repeated code here
-    ##        Is there a better way?
-    ##    probably -- shouldn't there always be a GUIMode?
-    ##    there cvould be a null GUI Mode, and use that instead of None
-    def LeftDoubleClickEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnLeftDouble(event)
-        event.Skip()
-
-    def MiddleDownEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnMiddleDown(event)
-        event.Skip()
-
-    def MiddleUpEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnMiddleUp(event)
-        event.Skip()
-
-    def MiddleDoubleClickEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnMiddleDouble(event)
-        event.Skip()
-
-    def RightDoubleCLickEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnRightDouble(event)
-        event.Skip()
-
-    def WheelEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnWheel(event)
-        event.Skip()
-
-    def LeftDownEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnLeftDown(event)
-        event.Skip()
-
-    def LeftUpEvent(self, event):
-        if self.HasCapture():
-            self.ReleaseMouse()
-        if self.GUIMode:
-            self.GUIMode.OnLeftUp(event)
-        event.Skip()
-
-    def MotionEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnMove(event)
-        event.Skip()
-
-    def RightDownEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnRightDown(event)
-        event.Skip()
-
-    def RightUpEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnRightUp(event)
-        event.Skip()
-        
-    def KeyDownEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnKeyDown(event)
-        event.Skip()
-
-    def KeyUpEvent(self, event):
-        if self.GUIMode:
-            self.GUIMode.OnKeyUp(event)
-        event.Skip()
-
     def MakeNewBuffers(self):
         ##fixme: this looks like tortured logic!
         self._BackgroundDirty = True
@@ -2832,23 +2672,13 @@ class FloatCanvas(wx.Panel):
                                                   self.PanelSize[1],
                                                   depth=self.HitTestBitmapDepth)
 
-    def OnSize(self, event=None):
-        self.InitializePanel()
-        #self.SizeTimer.Start(50, oneShot=True)
-        self.OnSizeTimer()
-
-    def OnSizeTimer(self, event=None):
-        self.MakeNewBuffers()
-        self.Draw()
-
-    def InitializePanel(self):
-        PanelSize  = N.array(self.GetClientSizeTuple(),  N.int32)
+    def InitializePanelSize(self, size):
+        PanelSize  = N.array(size,  N.int32)
         self.PanelSize  = N.maximum(PanelSize, (2,2)) ## OS-X sometimes gives a Size event when the panel is size (0,0)
         self.HalfPanelSize = self.PanelSize / 2 # lrk: added for speed in WorldToPixel
         self.AspectRatio = float(self.PanelSize[0]) / self.PanelSize[1]
 
-    def OnPaint(self, event):
-        dc = wx.PaintDC(self)
+    def PaintTo(self, dc):
         if self._ForegroundBuffer:
             dc.DrawBitmap(self._ForegroundBuffer,0,0)
         else:
@@ -2859,40 +2689,16 @@ class FloatCanvas(wx.Panel):
         #    self.GUIMode.DrawOnTop(dc)
         #except AttributeError:
         #    pass
-    
-    def Draw(self, Force=False):
+
+    def DrawDC(self, destdc, Force=False):
         """
-
-        Canvas.Draw(Force=False)
-
-        Re-draws the canvas.
-
-        Note that the buffer will not be re-drawn unless something has
-        changed. If you change a DrawObject directly, then the canvas
-        will not know anything has changed. In this case, you can force
-        a re-draw by passing in True for the Force flag:
-
-        Canvas.Draw(Force=True)
-
-        There is a main buffer set up to double buffer the screen, so
-        you can get quick re-draws when the window gets uncovered.
-
-        If there are any objects in self._ForeDrawList, then the
-        background gets drawn to a new buffer, and the foreground
-        objects get drawn on top of it. The final result is blitted to
-        the screen, and stored for future Paint events.  This is done so
-        that you can have a complicated background, but have something
-        changing on the foreground, without having to wait for the
-        background to get re-drawn. This can be used to support simple
-        animation, for instance.
-
+        Re-draws the canvas and copies to the destination DC
         """
 
         if N.sometrue(self.PanelSize <= 2 ):
             # it's possible for this to get called before being properly initialized.
             return
         if self.Debug: start = clock()
-        ScreenDC =  wx.ClientDC(self)
         ViewPortWorld = N.array(( self.PixelToWorld((0,0)),
                                   self.PixelToWorld(self.PanelSize) )
                                      )
@@ -2912,7 +2718,7 @@ class FloatCanvas(wx.Panel):
                 HTdc = None
             if self.GridUnder is not None:
                 self.GridUnder._Draw(dc, self)
-            self._DrawObjects(dc, self._DrawList, ScreenDC, self.ViewPortBB, HTdc)
+            self._DrawObjects(dc, self._DrawList, destdc, self.ViewPortBB, HTdc)
             self._BackgroundDirty = False
             del HTdc
 
@@ -2936,12 +2742,12 @@ class FloatCanvas(wx.Panel):
                 ForegroundHTdc = None
             self._DrawObjects(dc,
                               self._ForeDrawList,
-                              ScreenDC,
+                              destdc,
                               self.ViewPortBB,
                               ForegroundHTdc)
         if self.GridOver is not None:
             self.GridOver._Draw(dc, self)
-        ScreenDC.Blit(0, 0, self.PanelSize[0],self.PanelSize[1], dc, 0, 0)
+        destdc.Blit(0, 0, self.PanelSize[0],self.PanelSize[1], dc, 0, 0)
         # If the canvas is in the middle of a zoom or move,
         # the Rubber Band box needs to be re-drawn
         ##fixme: maybe GUIModes should never be None, and rather have a Do-nothing GUI-Mode.
@@ -3271,8 +3077,296 @@ class FloatCanvas(wx.Panel):
         etc. (see the wx docs for the complete list)
 
         """
-
         self._Buffer.SaveFile(filename, ImageType)
+    
+    def Draw(self, Force=False):
+        """
+
+        Canvas.Draw(Force=False)
+
+        Re-draws the canvas.
+
+        Note that the buffer will not be re-drawn unless something has
+        changed. If you change a DrawObject directly, then the canvas
+        will not know anything has changed. In this case, you can force
+        a re-draw by passing in True for the Force flag:
+
+        Canvas.Draw(Force=True)
+
+        There is a main buffer set up to double buffer the screen, so
+        you can get quick re-draws when the window gets uncovered.
+
+        If there are any objects in self._ForeDrawList, then the
+        background gets drawn to a new buffer, and the foreground
+        objects get drawn on top of it. The final result is blitted to
+        the screen, and stored for future Paint events.  This is done so
+        that you can have a complicated background, but have something
+        changing on the foreground, without having to wait for the
+        background to get re-drawn. This can be used to support simple
+        animation, for instance.
+
+        """
+
+        image = wx.EmptyBitmap(*self.PanelSize)
+        dc = wx.MemoryDC()
+        dc.SelectObject(image)
+        self.DrawDC(dc, Force)
+        return image
+
+
+#---------------------------------------------------------------------------
+class FloatCanvas(wx.Panel, OffScreenFloatCanvas):
+    """
+    FloatCanvas.py
+
+    This is a high level window for drawing maps and anything else in an
+    arbitrary coordinate system.
+
+    The goal is to provide a convenient way to draw stuff on the screen
+    without having to deal with handling OnPaint events, converting to pixel
+    coordinates, knowing about wxWindows brushes, pens, and colors, etc. It
+    also provides virtually unlimited zooming and scrolling
+
+    I am using it for two things:
+    1) general purpose drawing in floating point coordinates
+    2) displaying map data in Lat-long coordinates
+
+    If the projection is set to None, it will draw in general purpose
+    floating point coordinates. If the projection is set to 'FlatEarth', it
+    will draw a FlatEarth projection, centered on the part of the map that
+    you are viewing. You can also pass in your own projection function.
+
+    It is double buffered, so re-draws after the window is uncovered by something
+    else are very quick.
+
+    It relies on NumPy, which is needed for speed (maybe, I havn't profiled it)
+
+    Bugs and Limitations:
+        Lots: patches, fixes welcome
+
+    For Map drawing: It ignores the fact that the world is, in fact, a
+    sphere, so it will do strange things if you are looking at stuff near
+    the poles or the date line. so far I don't have a need to do that, so I
+    havn't bothered to add any checks for that yet.
+
+    Zooming:
+    I have set no zoom limits. What this means is that if you zoom in really
+    far, you can get integer overflows, and get wierd results. It
+    doesn't seem to actually cause any problems other than wierd output, at
+    least when I have run it.
+
+    Speed:
+    I have done a couple of things to improve speed in this app. The one
+    thing I have done is used NumPy Arrays to store the coordinates of the
+    points of the objects. This allowed me to use array oriented functions
+    when doing transformations, and should provide some speed improvement
+    for objects with a lot of points (big polygons, polylines, pointsets).
+
+    The real slowdown comes when you have to draw a lot of objects, because
+    you have to call the wx.DC.DrawSomething call each time. This is plenty
+    fast for tens of objects, OK for hundreds of objects, but pretty darn
+    slow for thousands of objects.
+
+    The solution is to be able to pass some sort of object set to the DC
+    directly. I've used DC.DrawPointList(Points), and it helped a lot with
+    drawing lots of points. I havn't got a LineSet type object, so I havn't
+    used DC.DrawLineList yet. I'd like to get a full set of DrawStuffList()
+    methods implimented, and then I'd also have a full set of Object sets
+    that could take advantage of them. I hope to get to it some day.
+
+    Mouse Events:
+
+    At this point, there are a full set of custom mouse events. They are
+    just like the regular mouse events, but include an extra attribute:
+    Event.GetCoords(), that returns the (x,y) position in world
+    coordinates, as a length-2 NumPy vector of Floats.
+
+    Copyright: Christopher Barker
+
+    License: Same as the version of wxPython you are using it with
+
+    Please let me know if you're using this!!!
+
+    Contact me at:
+
+    Chris.Barker@noaa.gov
+
+    """
+
+    def __init__(self, parent, id = -1,
+                 size = wx.DefaultSize,
+                 ProjectionFun = None,
+                 BackgroundColor = "WHITE",
+                 Debug = False,
+                 **kwargs):
+
+        wx.Panel.__init__( self, parent, id, wx.DefaultPosition, size, **kwargs)
+        OffScreenFloatCanvas.__init__(self, size, ProjectionFun, BackgroundColor, Debug, **kwargs)
+
+        wx.EVT_PAINT(self, self.OnPaint)
+        wx.EVT_SIZE(self, self.OnSize)
+
+        wx.EVT_LEFT_DOWN(self, self.LeftDownEvent)
+        wx.EVT_LEFT_UP(self, self.LeftUpEvent)
+        wx.EVT_LEFT_DCLICK(self, self.LeftDoubleClickEvent)
+        wx.EVT_MIDDLE_DOWN(self, self.MiddleDownEvent)
+        wx.EVT_MIDDLE_UP(self, self.MiddleUpEvent)
+        wx.EVT_MIDDLE_DCLICK(self, self.MiddleDoubleClickEvent)
+        wx.EVT_RIGHT_DOWN(self, self.RightDownEvent)
+        wx.EVT_RIGHT_UP(self, self.RightUpEvent)
+        wx.EVT_RIGHT_DCLICK(self, self.RightDoubleCLickEvent)
+        wx.EVT_MOTION(self, self.MotionEvent)
+        wx.EVT_MOUSEWHEEL(self, self.WheelEvent)
+        wx.EVT_KEY_DOWN(self, self.KeyDownEvent)
+        wx.EVT_KEY_UP(self, self.KeyUpEvent)
+
+
+        ## CHB: I'm leaving these out for now.
+        #wx.EVT_ENTER_WINDOW(self, self. )
+        #wx.EVT_LEAVE_WINDOW(self, self. )
+
+        # timer to give a delay when re-sizing so that buffers aren't re-built too many times.
+        self.SizeTimer = wx.PyTimer(self.OnSizeTimer)
+
+#        self.InitializePanel()
+#        self.MakeNewBuffers()
+
+#        self.CreateCursors()
+
+    def _RaiseMouseEvent(self, Event, EventType):
+        """
+        This is called in various other places to raise a Mouse Event
+        """
+        pt = self.PixelToWorld( Event.GetPosition() )
+        evt = _MouseEvent(EventType, Event, self.GetId(), pt)
+        # called the Windows usual event handler
+        self.GetEventHandler().ProcessEvent(evt)
+
+    def HitTest(self, event, HitEvent):
+        # This method has to be here, too, not just in OffScreenFloatCanvas
+        # because there is a HitTest method in wx.Panel that will get called
+        # instead.
+        OffScreenFloatCanvas.HitTest(self, event, HitEvent)
+
+    ## fixme: There is a lot of repeated code here
+    ##        Is there a better way?
+    ##    probably -- shouldn't there always be a GUIMode?
+    ##    there cvould be a null GUI Mode, and use that instead of None
+    def LeftDoubleClickEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnLeftDouble(event)
+        event.Skip()
+
+    def MiddleDownEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnMiddleDown(event)
+        event.Skip()
+
+    def MiddleUpEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnMiddleUp(event)
+        event.Skip()
+
+    def MiddleDoubleClickEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnMiddleDouble(event)
+        event.Skip()
+
+    def RightDoubleCLickEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnRightDouble(event)
+        event.Skip()
+
+    def WheelEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnWheel(event)
+        event.Skip()
+
+    def LeftDownEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnLeftDown(event)
+        event.Skip()
+
+    def LeftUpEvent(self, event):
+        if self.HasCapture():
+            self.ReleaseMouse()
+        if self.GUIMode:
+            self.GUIMode.OnLeftUp(event)
+        event.Skip()
+
+    def MotionEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnMove(event)
+        event.Skip()
+
+    def RightDownEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnRightDown(event)
+        event.Skip()
+
+    def RightUpEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnRightUp(event)
+        event.Skip()
+        
+    def KeyDownEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnKeyDown(event)
+        event.Skip()
+
+    def KeyUpEvent(self, event):
+        if self.GUIMode:
+            self.GUIMode.OnKeyUp(event)
+        event.Skip()
+
+    def OnSize(self, event=None):
+        self.InitializePanel()
+        #self.SizeTimer.Start(50, oneShot=True)
+        self.OnSizeTimer()
+
+    def OnSizeTimer(self, event=None):
+        self.MakeNewBuffers()
+        self.Draw()
+
+    def InitializePanel(self):
+        size = self.GetClientSizeTuple()
+        self.InitializePanelSize(size)
+
+    def OnPaint(self, event):
+        dc = wx.PaintDC(self)
+        self.PaintTo(dc)
+
+
+    def Draw(self, Force=False):
+        """
+
+        Canvas.Draw(Force=False)
+
+        Re-draws the canvas.
+
+        Note that the buffer will not be re-drawn unless something has
+        changed. If you change a DrawObject directly, then the canvas
+        will not know anything has changed. In this case, you can force
+        a re-draw by passing in True for the Force flag:
+
+        Canvas.Draw(Force=True)
+
+        There is a main buffer set up to double buffer the screen, so
+        you can get quick re-draws when the window gets uncovered.
+
+        If there are any objects in self._ForeDrawList, then the
+        background gets drawn to a new buffer, and the foreground
+        objects get drawn on top of it. The final result is blitted to
+        the screen, and stored for future Paint events.  This is done so
+        that you can have a complicated background, but have something
+        changing on the foreground, without having to wait for the
+        background to get re-drawn. This can be used to support simple
+        animation, for instance.
+
+        """
+
+        ScreenDC =  wx.ClientDC(self)
+        self.DrawDC(ScreenDC, Force)
 
 
 def _makeFloatCanvasAddMethods(): ## lrk's code for doing this in module __init__
