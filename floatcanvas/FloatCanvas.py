@@ -3161,7 +3161,7 @@ def wrap_projection(projection, points):
     p = N.asarray(points, N.float)
     if len(p.shape) == 1:
         projected = projection(p[0], p[1])
-        return projected[0], projected[1]
+        return N.asarray(projected, N.float)
     else:
         projected = N.zeros(p.shape, dtype=N.float32)
         projected[:,0], projected[:,1] = projection(points[:,0], points[:,1])
@@ -3203,7 +3203,7 @@ class PyProjFloatCanvas(OffScreenFloatCanvas):
         Lengths should be a NX2 array of (x,y) coordinates, or
         a 2-tuple, or sequence of 2-tuples.
         """
-        return  ( (N.asarray(Lengths, N.float)*self.TransformVector) ).astype('i')
+        return self.ProjectionFun(Lengths)
 
     def ScalePixelToWorld(self,Lengths):
         """
