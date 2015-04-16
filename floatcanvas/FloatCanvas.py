@@ -3154,6 +3154,74 @@ class OffScreenFloatCanvas(object):
         return image
 
 
+def wrap_projection(projection, points):
+    """
+    Wrap a PyProj projection function into a format that FloatCanvas expects
+    """
+    p = N.asarray(points, N.float)
+    if len(p.shape) == 1:
+        projected = projection(p[0], p[1])
+        return projected[0], projected[1]
+    else:
+        projected = N.zeros(p.shape, dtype=N.float32)
+        projected[:,0], projected[:,1] = projection(points[:,0], points[:,1])
+        return projected
+
+class PyProjFloatCanvas(OffScreenFloatCanvas):
+    def SetProjectionFun(self, f):
+        import functools
+        
+        self.ProjectionFun = functools.partial(wrap_projection, f)
+
+    def PixelToWorld(self, Points):
+        """
+        Converts coordinates from Pixel coordinates to world coordinates.
+
+        Points is a tuple of (x,y) coordinates, or a list of such tuples,
+        or a NX2 Numpy array of x,y coordinates.
+
+        """
+        return  (((N.asarray(Points, N.float) -
+                   (self.PanelSize/2))/self.TransformVector) +
+                 self.ViewPortCenter)
+
+    def WorldToPixel(self,Coordinates):
+        """
+        This function will get passed to the drawing functions of the objects,
+        to transform from world to pixel coordinates.
+        Coordinates should be a NX2 array of (x,y) coordinates, or
+        a 2-tuple, or sequence of 2-tuples.
+        """
+        #Note: this can be called by users code for various reasons, so N.asarray is needed.
+        return self.ProjectionFun(Coordinates)
+
+    def ScaleWorldToPixel(self,Lengths):
+        """
+        This function will get passed to the drawing functions of the objects,
+        to Change a length from world to pixel coordinates.
+
+        Lengths should be a NX2 array of (x,y) coordinates, or
+        a 2-tuple, or sequence of 2-tuples.
+        """
+        return  ( (N.asarray(Lengths, N.float)*self.TransformVector) ).astype('i')
+
+    def ScalePixelToWorld(self,Lengths):
+        """
+        This function computes a pair of x.y lengths,
+        to change then from pixel to world coordinates.
+
+        Lengths should be a NX2 array of (x,y) coordinates, or
+        a 2-tuple, or sequence of 2-tuples.
+        """
+        return  (N.asarray(Lengths,N.float) / self.TransformVector)
+
+    def DrawToDC(self, world_rect, dc, HTdc=None):
+        if self.BoundingBoxDirty:
+            self._ResetBoundingBox()
+        self.ViewPortBB = BBox.asBBox(world_rect)
+        self._DrawObjects(dc, self._DrawList, dc, self.ViewPortBB, HTdc)
+
+
 #---------------------------------------------------------------------------
 class FloatCanvas(wx.Panel, OffScreenFloatCanvas):
     """
