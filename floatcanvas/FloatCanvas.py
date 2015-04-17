@@ -3155,7 +3155,13 @@ class OffScreenFloatCanvas(object):
         self.DrawDC(dc, Force)
         return image
     
-    def SerializeJSON(self):
+    JSON_File_Header = "FloatCanvas JSON Format"
+    JSON_Default_Format = "1"
+    
+    def Serialize(self):
+        return self.SerializeJSON_Version1()
+    
+    def SerializeJSON_Version1(self):
         import inspect
         import json
         
@@ -3166,35 +3172,46 @@ class OffScreenFloatCanvas(object):
             # to rebuild the object
             argspec = inspect.getargspec(obj.__init__)
             args = argspec.args[1:]
-            print obj.__class__.__name__, args
             params = []
             for n in args:
                 value = getattr(obj, n)
                 if isinstance(value, N.ndarray):
                     value = value.tolist()
-                elif n == "LineColor":  # test: convert all colors to white
-                    value = "White"
                 params.append(value)
             d = {'class': obj.__class__.__name__,
                  'params': params,
                  }
-            print d
             objects.append(d)
         j = json.dumps(objects)
-        print j
-        self.ClearAll()
-        self.UnserializeJSON(j)
+        header = "%s %s|" % (self.JSON_File_Header, self.JSON_Default_Format)
+        return header + j
     
-    def UnserializeJSON(self, text):
+    def Unserialize(self, text):
+        """Restore from json representation.
+        
+        This is the driver routine and will call the version-specific routine
+        based on the version key in the header string.  Version specific
+        unserializers are named 'UnserializeJSON_VersionX' where X is the
+        version number.
+        """
+        if not text.startswith(self.JSON_File_Header):
+            raise ValueError("Not correctly formatted JSON for FloatCanvas")
+        header, json_data = text.split("|", 1)
+        _, version = header.rsplit(" ", 1)
+        name = "UnserializeJSON_Version" + version
+        try:
+            method = getattr(self, name)
+        except AttributeEror:
+            raise ValueError("This version of FloatCanvas doesn't understand version %s" % version)
+        method(json_data)
+    
+    def UnserializeJSON_Version1(self, text):
         import json
         
         subclasses = get_all_subclasses(DrawObject)
-        print subclasses
         name_to_class = {k.__name__: k for k in subclasses}
-        print name_to_class
         
         j = json.loads(text)
-        print j
         for d in j:
             name = d['class']
             params = d['params']
