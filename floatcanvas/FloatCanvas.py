@@ -1178,6 +1178,7 @@ class Circle(XYObjectMixin, LineAndFillMixin, DrawObject):
         DrawObject.__init__(self, InForeground)
 
         self.XY = N.array(XY, N.float)
+        self.Diameter = Diameter # for serializiation
         self.WH = N.array((Diameter/2, Diameter/2), N.float) # just to keep it compatible with others
         self.CalcBoundingBox()
 
@@ -1197,6 +1198,7 @@ class Circle(XYObjectMixin, LineAndFillMixin, DrawObject):
         self.SetBrush(FillColor,FillStyle)
 
     def SetDiameter(self, Diameter):
+        self.Diameter = Diameter # for serializiation
         self.WH = N.array((Diameter/2, Diameter/2), N.float) # just to keep it compatible with others
 
     def CalcBoundingBox(self):
@@ -3152,7 +3154,80 @@ class OffScreenFloatCanvas(object):
         dc.SelectObject(image)
         self.DrawDC(dc, Force)
         return image
+    
+    def SerializeJSON(self):
+        import inspect
+        
+        objects = []
+        for obj in self._DrawList:
+            # Get the names of params specified on the __init__ method
+            # signature to use as data for the json string that will be used
+            # to rebuild the object
+            argspec = inspect.getargspec(obj.__init__)
+            args = argspec.args[1:]
+            print obj.__class__.__name__, args
+            params = {n: getattr(obj, n) for n in args}
+            print params
+            if "LineColor" in params:
+                params["LineColor"] = "White"
+            d = {'type': obj.__class__.__name__,
+                 'params': [params[n] for n in args],
+                 }
+            print d
+            objects.append(d)
+        self.ClearAll()
+        self.UnserializeJSON(objects)
+    
+    def UnserializeJSON(self, json):
+        subclasses = get_all_subclasses(DrawObject)
+        print subclasses
+        name_to_class = {k.__name__: k for k in subclasses}
+        print name_to_class
+        for d in json:
+            name = d['type']
+            params = d['params']
+            kls = name_to_class[d['type']]
+            obj = kls(*params)
+            self.AddObject(obj)
+        
 
+def get_all_subclasses(parent, subclassof=None):
+    """
+    Recursive call to get all classes that have a specified class
+    in their ancestry.  The call to __subclasses__ only finds the
+    direct, child subclasses of an object, so to find
+    grandchildren and objects further down the tree, we have to go
+    recursively down each subclasses hierarchy to see if the
+    subclasses are of the type we want.
+
+    @param parent: class used to find subclasses
+    @type parent: class
+    @param subclassof: class used to verify type during recursive calls
+    @type subclassof: class
+    @returns: list of classes
+    """
+    if subclassof is None:
+        subclassof=parent
+    subclasses={}
+
+    # this call only returns immediate (child) subclasses, not
+    # grandchild subclasses where there is an intermediate class
+    # between the two.
+    classes=parent.__subclasses__()
+    for kls in classes:
+        # FIXME: this seems to return multiple copies of the same class,
+        # but I probably just don't understand enough about how python
+        # creates subclasses
+        # dprint("%s id=%s" % (kls, id(kls)))
+        if issubclass(kls,subclassof):
+            subclasses[kls] = 1
+        # for each subclass, recurse through its subclasses to
+        # make sure we're not missing any descendants.
+        subs=get_all_subclasses(parent=kls)
+        if len(subs)>0:
+            for kls in subs:
+                subclasses[kls] = 1
+    return subclasses.keys()
 
 def wrap_projection(projection, points):
     """
