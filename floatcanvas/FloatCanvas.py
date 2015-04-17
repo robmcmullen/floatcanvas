@@ -3157,6 +3157,7 @@ class OffScreenFloatCanvas(object):
     
     def SerializeJSON(self):
         import inspect
+        import json
         
         objects = []
         for obj in self._DrawList:
@@ -3166,68 +3167,58 @@ class OffScreenFloatCanvas(object):
             argspec = inspect.getargspec(obj.__init__)
             args = argspec.args[1:]
             print obj.__class__.__name__, args
-            params = {n: getattr(obj, n) for n in args}
-            print params
-            if "LineColor" in params:
-                params["LineColor"] = "White"
-            d = {'type': obj.__class__.__name__,
-                 'params': [params[n] for n in args],
+            params = []
+            for n in args:
+                value = getattr(obj, n)
+                if isinstance(value, N.ndarray):
+                    value = value.tolist()
+                elif n == "LineColor":  # test: convert all colors to white
+                    value = "White"
+                params.append(value)
+            d = {'class': obj.__class__.__name__,
+                 'params': params,
                  }
             print d
             objects.append(d)
+        j = json.dumps(objects)
+        print j
         self.ClearAll()
-        self.UnserializeJSON(objects)
+        self.UnserializeJSON(j)
     
-    def UnserializeJSON(self, json):
+    def UnserializeJSON(self, text):
+        import json
+        
         subclasses = get_all_subclasses(DrawObject)
         print subclasses
         name_to_class = {k.__name__: k for k in subclasses}
         print name_to_class
-        for d in json:
-            name = d['type']
+        
+        j = json.loads(text)
+        print j
+        for d in j:
+            name = d['class']
             params = d['params']
-            kls = name_to_class[d['type']]
+            kls = name_to_class[name]
             obj = kls(*params)
             self.AddObject(obj)
         
 
-def get_all_subclasses(parent, subclassof=None):
+def get_all_subclasses(parent):
     """
-    Recursive call to get all classes that have a specified class
-    in their ancestry.  The call to __subclasses__ only finds the
-    direct, child subclasses of an object, so to find
-    grandchildren and objects further down the tree, we have to go
-    recursively down each subclasses hierarchy to see if the
-    subclasses are of the type we want.
-
-    @param parent: class used to find subclasses
-    @type parent: class
-    @param subclassof: class used to verify type during recursive calls
-    @type subclassof: class
-    @returns: list of classes
+    Find all subclasses that have the specified class in their ancestry.
     """
-    if subclassof is None:
-        subclassof=parent
-    subclasses={}
+    subclasses = set()
 
-    # this call only returns immediate (child) subclasses, not
-    # grandchild subclasses where there is an intermediate class
-    # between the two.
-    classes=parent.__subclasses__()
+    # __subclasses__ only finds the direct, child subclasses of an object, so
+    # to find grandchildren and objects further down the tree, we have to go
+    # recursively down each subclasses hierarchy to see if the subclasses are
+    # of the type we want.
+    classes = parent.__subclasses__()
     for kls in classes:
-        # FIXME: this seems to return multiple copies of the same class,
-        # but I probably just don't understand enough about how python
-        # creates subclasses
-        # dprint("%s id=%s" % (kls, id(kls)))
-        if issubclass(kls,subclassof):
-            subclasses[kls] = 1
-        # for each subclass, recurse through its subclasses to
-        # make sure we're not missing any descendants.
-        subs=get_all_subclasses(parent=kls)
-        if len(subs)>0:
-            for kls in subs:
-                subclasses[kls] = 1
-    return subclasses.keys()
+        if issubclass(kls, parent):
+            subclasses.add(kls)
+        subclasses.update(get_all_subclasses(kls))  # recurse!
+    return sorted(subclasses, key=lambda a:a.__name__)
 
 def wrap_projection(projection, points):
     """
