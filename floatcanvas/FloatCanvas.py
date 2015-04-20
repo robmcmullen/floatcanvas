@@ -1330,7 +1330,9 @@ class Text(TextObjectMixin, DrawObject, ):
 
     """
 
-    def __init__(self,String, xy,
+    SKIP_SERIALIZATION = ['Font']
+
+    def __init__(self,String, XY,
                  Size =  14,
                  Color = "Black",
                  BackgroundColor = None,
@@ -1362,10 +1364,19 @@ class Text(TextObjectMixin, DrawObject, ):
             Underlined         =  Font.GetUnderlined()
             Weight             =  Font.GetWeight()
         self.SetFont(Size, Family, Style, Weight, Underlined, FaceName)
+        
+        # Need these attributes stored in the object for serialization
+        self.FaceName = FaceName
+        self.Family = Family
+        self.Size = Size
+        self.Style = Style
+        self.Underlined = Underlined
+        self.Weight = Weight
+        self.Position = Position
 
-        self.BoundingBox = BBox.asBBox((xy, xy))
+        self.BoundingBox = BBox.asBBox((XY, XY))
 
-        self.XY = N.asarray(xy)
+        self.XY = N.asarray(XY)
         self.XY.shape = (2,)
 
         (self.TextWidth, self.TextHeight) = (None, None)
@@ -3158,6 +3169,12 @@ class OffScreenFloatCanvas(object):
     JSON_File_Header = "FloatCanvas JSON Format"
     JSON_Default_Format = "1"
     
+    def Save(self, filename):
+        j = self.Serialize()
+        fh = open(filename, "w")
+        fh.write(j)
+        fh.close()
+    
     def Serialize(self):
         return self.SerializeJSON_Version1()
     
@@ -3171,7 +3188,10 @@ class OffScreenFloatCanvas(object):
             # signature to use as data for the json string that will be used
             # to rebuild the object
             argspec = inspect.getargspec(obj.__init__)
-            args = argspec.args[1:]
+            args = argspec.args[1:] # skip self
+            if hasattr(obj, "SKIP_SERIALIZATION"):
+                for n in obj.SKIP_SERIALIZATION:
+                    args.remove(n)
             params = []
             for n in args:
                 value = getattr(obj, n)
