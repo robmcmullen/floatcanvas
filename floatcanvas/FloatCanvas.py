@@ -3201,13 +3201,12 @@ class OffScreenFloatCanvas(object):
                 if isinstance(value, N.ndarray):
                     value = value.tolist()
                 params.append(value)
-            d = {'class': obj.__class__.__name__,
-                 'params': params,
-                 }
+            d = [obj.__class__.__name__, params]
             objects.append(d)
-        j = json.dumps(objects)
-        header = "%s %s|" % (self.JSON_File_Header, self.JSON_Default_Format)
-        return header + j
+        object_reps = [json.dumps(o) for o in objects]
+        header = "%s %s|[\n" % (self.JSON_File_Header, self.JSON_Default_Format)
+        j = ",\n".join(object_reps)
+        return header + j + "\n]\n"
     
     def Unserialize(self, text):
         """Restore from json representation.
@@ -3236,8 +3235,8 @@ class OffScreenFloatCanvas(object):
         
         j = json.loads(text)
         for d in j:
-            name = d['class']
-            params = d['params']
+            name = d[0]
+            params = d[1]
             kls = name_to_class[name]
             obj = kls(*params)
             self.AddObject(obj)
