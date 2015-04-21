@@ -3459,7 +3459,7 @@ class FloatCanvas(wx.Panel, OffScreenFloatCanvas):
         # This method has to be here, too, not just in OffScreenFloatCanvas
         # because there is a HitTest method in wx.Panel that will get called
         # instead.
-        OffScreenFloatCanvas.HitTest(self, event, HitEvent)
+        return OffScreenFloatCanvas.HitTest(self, event, HitEvent)
 
     ## fixme: There is a lot of repeated code here
     ##        Is there a better way?
