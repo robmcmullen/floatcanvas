@@ -2971,6 +2971,9 @@ class OffScreenFloatCanvas(object):
             self._ResetBoundingBox()
         self.MakeNewBuffers()
         self.HitDict = None
+    
+    def IsEmpty(self):
+        return bool(self._DrawList) or bool(self._ForeDrawList)
 
     def _ResetBoundingBox(self):
         SetToNull=False
