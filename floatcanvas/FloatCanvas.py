@@ -160,6 +160,25 @@ class DrawObject(object):
       Is this still necessary?
 
     """
+    @classmethod
+    def get_init_method_arg_names(cls):
+        import inspect
+        
+        for parent in cls.__mro__:
+            # Looking for regular arguments named in the __init__ method, not
+            # the varargs list or kwargs dict.
+            argspec = inspect.getargspec(parent.__init__)
+            print argspec
+            args = argspec.args[1:] # skip self
+            # If there are no regular arguments, look up in the hierarchy until
+            # we find some.
+            if len(args) > 0:
+                break
+        
+        if hasattr(parent, "SKIP_SERIALIZATION"):
+            for n in parent.SKIP_SERIALIZATION:
+                args.remove(n)
+        return args
 
     def __init__(self, InForeground  = False, IsVisible = True):
         """
@@ -3190,13 +3209,9 @@ class OffScreenFloatCanvas(object):
             # Get the names of params specified on the __init__ method
             # signature to use as data for the json string that will be used
             # to rebuild the object
-            argspec = inspect.getargspec(obj.__init__)
-            args = argspec.args[1:] # skip self
-            if hasattr(obj, "SKIP_SERIALIZATION"):
-                for n in obj.SKIP_SERIALIZATION:
-                    args.remove(n)
+            names = obj.get_init_method_arg_names()
             params = []
-            for n in args:
+            for n in names:
                 value = getattr(obj, n)
                 if isinstance(value, N.ndarray):
                     value = value.tolist()
